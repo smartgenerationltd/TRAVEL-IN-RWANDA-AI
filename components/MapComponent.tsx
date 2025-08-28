@@ -4,24 +4,19 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Destination } from '../types';
 import MapPinIcon from './icons/MapPinIcon';
 import DirectionsIcon from './icons/DirectionsIcon';
-import ChevronLeftIcon from './icons/ChevronLeftIcon';
-import ChevronRightIcon from './icons/ChevronRightIcon';
 
 declare var L: any; // Use Leaflet from CDN
 
 interface MapComponentProps {
-  destination: Destination | null;
+  destinations: Destination[];
   onGetDirections: (destination: Destination) => void;
-  onPrev: () => void;
-  onNext: () => void;
-  currentIndex: number;
-  totalDestinations: number;
+  getDirectionsText: string;
 }
 
-const MapComponent: React.FC<MapComponentProps> = ({ destination, onGetDirections, onPrev, onNext, currentIndex, totalDestinations }) => {
+const MapComponent: React.FC<MapComponentProps> = ({ destinations, onGetDirections, getDirectionsText }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any | null>(null);
-  const markerRef = useRef<any | null>(null);
+  const markerLayerRef = useRef<any | null>(null);
 
   // Initialize map
   useEffect(() => {
@@ -39,31 +34,33 @@ const MapComponent: React.FC<MapComponentProps> = ({ destination, onGetDirection
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
       mapRef.current = map;
+      markerLayerRef.current = L.featureGroup().addTo(map);
     }
   }, []);
 
   // Handle destination changes
   useEffect(() => {
-    if (mapRef.current && destination) {
+    if (mapRef.current && markerLayerRef.current) {
+      markerLayerRef.current.clearLayers();
+
+      if (destinations.length === 0) {
+        mapRef.current.flyTo([-1.9403, 29.8739], 8);
+        return;
+      }
+
+      const iconMarkup = renderToStaticMarkup(<MapPinIcon className="h-10 w-10 text-blue-600 drop-shadow-lg" />);
+      const customIcon = L.divIcon({
+          html: iconMarkup,
+          className: '',
+          iconSize: [40, 40],
+          iconAnchor: [20, 40],
+          popupAnchor: [0, -40]
+      });
+
+      destinations.forEach(destination => {
         const { lat, lng, name } = destination;
-        const iconMarkup = renderToStaticMarkup(<MapPinIcon className="h-10 w-10 text-blue-600 drop-shadow-lg" />);
-        const customIcon = L.divIcon({
-            html: iconMarkup,
-            className: '',
-            iconSize: [40, 40],
-            iconAnchor: [20, 40],
-            popupAnchor: [0, -40]
-        });
+        const marker = L.marker([lat, lng], { icon: customIcon });
 
-        // Remove old marker
-        if (markerRef.current) {
-            markerRef.current.remove();
-        }
-
-        // Add new marker
-        markerRef.current = L.marker([lat, lng], { icon: customIcon }).addTo(mapRef.current);
-
-        // Create popup content
         const popupContent = document.createElement('div');
         popupContent.innerHTML = `
             <div class="font-sans">
@@ -76,44 +73,26 @@ const MapComponent: React.FC<MapComponentProps> = ({ destination, onGetDirection
         iconSpan.innerHTML = renderToStaticMarkup(<DirectionsIcon className="h-4 w-4" />);
         button.appendChild(iconSpan);
         const textSpan = document.createElement('span');
-        textSpan.innerText = 'Get Directions';
+        textSpan.innerText = getDirectionsText;
         button.appendChild(textSpan);
 
         button.onclick = () => onGetDirections(destination);
         popupContent.appendChild(button);
 
-        markerRef.current.bindPopup(popupContent).openPopup();
-        
-        mapRef.current.flyTo([lat, lng], 13); // Zoom into the location
+        marker.bindPopup(popupContent);
+        markerLayerRef.current.addLayer(marker);
+      });
+      
+      if (destinations.length > 0) {
+        const bounds = markerLayerRef.current.getBounds();
+        mapRef.current.flyToBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+      }
     }
-  }, [destination, onGetDirections]);
+  }, [destinations, onGetDirections, getDirectionsText]);
 
   return (
     <div className="relative h-full w-full">
       <div ref={mapContainerRef} className="h-full w-full bg-gray-200 dark:bg-gray-800" />
-      {totalDestinations > 1 && (
-        <div className="absolute bottom-4 left-4 z-[1000] flex items-center space-x-2 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm p-1 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
-          <button
-            onClick={onPrev}
-            disabled={currentIndex <= 0}
-            className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            aria-label="Previous destination"
-          >
-            <ChevronLeftIcon className="h-5 w-5 text-gray-700 dark:text-gray-300" />
-          </button>
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 px-2 tabular-nums">
-            {currentIndex + 1} / {totalDestinations}
-          </span>
-          <button
-            onClick={onNext}
-            disabled={currentIndex >= totalDestinations - 1}
-            className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            aria-label="Next destination"
-          >
-            <ChevronRightIcon className="h-5 w-5 text-gray-700 dark:text-gray-300" />
-          </button>
-        </div>
-      )}
     </div>
   );
 };
